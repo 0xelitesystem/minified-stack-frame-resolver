@@ -1,0 +1,964 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Minified stack frame resolver</title>
+<meta name="description" content="Paste a production stack trace and its source map and get the original file, line and column for every frame, with the off by one column correction applied and every frame it changes flagged. Runs entirely in your browser.">
+<link rel="canonical" href="https://0xelitesystem.github.io/minified-stack-frame-resolver/">
+<meta property="og:type" content="website">
+<meta property="og:title" content="Minified stack frame resolver">
+<meta property="og:description" content="Paste a production stack trace and its source map and get the original file, line and column for every frame, with the off by one column correction applied and every frame it changes flagged.">
+<meta property="og:url" content="https://0xelitesystem.github.io/minified-stack-frame-resolver/">
+<script type="application/ld+json">
+{"@context":"https://schema.org","@type":"SoftwareApplication","name":"Minified stack frame resolver","applicationCategory":"DeveloperApplication","operatingSystem":"Any (browser)","offers":{"@type":"Offer","price":"0","priceCurrency":"USD"},"url":"https://0xelitesystem.github.io/minified-stack-frame-resolver/","author":{"@type":"Person","name":"0xelitesystem","url":"https://elitesystem.ai"}}
+</script>
+<style>
+:root{
+  --bg:#ffffff; --surface:#f3f5f8; --surface2:#e7ebf0;
+  --flag:#e9e4df; --flag2:#dedbd8;
+  --ink:#11151b; --ink-soft:#4a525c;
+  --line:#c3cad3; --line-strong:#767e89;
+  --accent:#0a4f9e; --ok:#14682c; --warn:#8a4d00; --err:#a82d14; --info:#0a4f9e;
+}
+@media (prefers-color-scheme: dark){
+  :root{
+    --bg:#0e1116; --surface:#161a20; --surface2:#1e242c;
+    --flag:#2b2927; --flag2:#323232;
+    --ink:#eef1f5; --ink-soft:#b2bbc6;
+    --line:#333c47; --line-strong:#7d8794;
+    --accent:#82b8f2; --ok:#63cb8b; --warn:#e8b168; --err:#ffa08d; --info:#82b8f2;
+  }
+}
+*{box-sizing:border-box}
+body{
+  margin:0; background:var(--bg); color:var(--ink);
+  font:16px/1.55 system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+}
+.mono{font-family:ui-monospace,"Cascadia Mono","SFMono-Regular",Consolas,"Liberation Mono",Menlo,monospace}
+.wrap{max-width:1180px; margin:0 auto; padding:28px 20px 64px}
+header h1{font-size:26px; line-height:1.2; margin:0 0 6px}
+header p.lede{margin:0 0 4px; color:var(--ink); max-width:70ch}
+header p.sub{margin:6px 0 0; color:var(--ink-soft); max-width:70ch; font-size:15px}
+h2{font-size:19px; margin:32px 0 10px}
+a{color:var(--accent)}
+.grid{display:grid; grid-template-columns:1fr 1fr; gap:18px; margin-top:20px}
+@media (max-width:820px){.grid{grid-template-columns:1fr}}
+.panel{background:var(--surface); border:1px solid var(--line); border-radius:10px; padding:14px}
+.panel label.big{display:block; font-weight:600; margin-bottom:6px}
+.hint{color:var(--ink-soft); font-size:14px; margin:0 0 8px}
+textarea{
+  width:100%; min-height:190px; resize:vertical; padding:10px;
+  background:var(--bg); color:var(--ink);
+  border:1px solid var(--line-strong); border-radius:8px;
+  font-family:ui-monospace,"Cascadia Mono","SFMono-Regular",Consolas,"Liberation Mono",Menlo,monospace;
+  font-size:13.5px; line-height:1.5;
+}
+.drop{
+  border:2px dashed var(--line-strong); border-radius:8px; padding:10px 12px; margin-bottom:10px;
+  display:flex; flex-wrap:wrap; gap:10px; align-items:center; background:var(--bg);
+}
+.drop.over{border-color:var(--accent); border-style:solid}
+.drop span{color:var(--ink-soft); font-size:14px}
+.row{display:flex; flex-wrap:wrap; gap:10px; margin-top:16px; align-items:center}
+button{
+  font:inherit; font-size:15px; padding:9px 15px; border-radius:8px; cursor:pointer;
+  background:var(--surface2); color:var(--ink); border:1px solid var(--line-strong);
+}
+button.primary{background:var(--accent); color:var(--bg); border-color:var(--accent); font-weight:600}
+button:hover{border-color:var(--accent)}
+:focus-visible{outline:3px solid var(--accent); outline-offset:2px}
+input[type=file]{font:inherit; font-size:14px; color:var(--ink); max-width:100%}
+.status{margin-top:16px; padding:12px 14px; border-radius:8px; background:var(--surface); border:1px solid var(--line); min-height:24px}
+.status p{margin:0 0 6px}
+.status p:last-child{margin-bottom:0}
+.err{color:var(--err); font-weight:600}
+.okmsg{color:var(--ok); font-weight:600}
+.warnmsg{color:var(--warn); font-weight:600}
+.infomsg{color:var(--info); font-weight:600}
+.tablewrap{overflow-x:auto; margin-top:18px; border:1px solid var(--line); border-radius:10px}
+table{border-collapse:collapse; width:100%; background:var(--surface); font-size:14px}
+caption{text-align:left; padding:10px 12px; color:var(--ink-soft); font-size:14px}
+th,td{text-align:left; padding:8px 10px; border-bottom:1px solid var(--line); vertical-align:top}
+th{background:var(--surface2); font-size:13px; letter-spacing:.01em}
+tr.flagged td{background:var(--flag)}
+tr.detail td{background:var(--surface2); color:var(--ink-soft); font-size:13.5px}
+tr.detail.flagged td{background:var(--flag2)}
+td.num{white-space:nowrap}
+.soft{color:var(--ink-soft)}
+.legend{margin-top:22px; padding:14px 16px; background:var(--surface); border:1px solid var(--line); border-radius:10px}
+.legend p{margin:0 0 8px; max-width:78ch}
+.legend p:last-child{margin-bottom:0}
+pre{
+  margin:10px 0 0; padding:10px 12px; background:var(--surface2); border:1px solid var(--line);
+  border-radius:8px; overflow-x:auto; font-size:13px; color:var(--ink); white-space:pre-wrap; word-break:break-word;
+}
+ul.plain{margin:8px 0 0; padding-left:20px}
+ul.plain li{margin-bottom:4px}
+footer{margin-top:40px; padding-top:16px; border-top:1px solid var(--line); color:var(--ink-soft); font-size:14px}
+.visually-hidden{position:absolute; width:1px; height:1px; overflow:hidden; clip:rect(0 0 0 0); white-space:nowrap}
+</style>
+</head>
+<body>
+<div class="wrap">
+<header>
+  <h1>Minified stack frame resolver</h1>
+  <p class="lede">Paste a production stack trace and the matching source map. Every frame is resolved to its original file, line and column, twice: once with the minus one column correction and once without it, so you can see which frames a naive resolver answers wrongly.</p>
+  <p class="sub">Nothing is uploaded and nothing is downloaded. The map and the trace stay in this tab. No <code>sourceMappingURL</code> is followed, so the map has to be supplied by you.</p>
+</header>
+
+<div class="grid">
+  <section class="panel">
+    <label class="big" for="trace">Stack trace</label>
+    <p class="hint" id="trace-hint">Paste the trace exactly as you copied it. Lines that are not frames are listed back to you untouched.</p>
+    <textarea id="trace" spellcheck="false" aria-describedby="trace-hint"></textarea>
+  </section>
+
+  <section class="panel">
+    <label class="big" for="mapjson">Source map</label>
+    <p class="hint" id="map-hint">Drop or pick a <code>.map</code> file, or paste the map JSON below. All three routes fill the same box.</p>
+    <div class="drop" id="drop">
+      <label for="mapfile" class="visually-hidden">Choose a source map file</label>
+      <input type="file" id="mapfile" accept=".map,.json,application/json,text/plain">
+      <span>or drop a file here</span>
+    </div>
+    <textarea id="mapjson" spellcheck="false" aria-describedby="map-hint"></textarea>
+  </section>
+</div>
+
+<div class="row">
+  <button type="button" class="primary" id="resolve">Resolve frames</button>
+  <button type="button" id="example">Load the worked example</button>
+  <button type="button" id="clear">Clear</button>
+  <button type="button" id="selftest">Run self test</button>
+</div>
+
+<div class="status" id="status" role="status" aria-live="polite"></div>
+
+<div id="results"></div>
+
+<section class="legend">
+  <h2 style="margin-top:0">What the verdict column means</h2>
+  <p>V8 reports a 1-based column. A source map stores 0-based generated columns, so the lookup has to search for the greatest generated column less than or equal to the reported column minus one. That minus one is the whole correction, and it is applied to the column before the search.</p>
+  <p>The corrected and uncorrected lookups diverge if and only if the map contains a mapping segment at a generated column exactly equal to the reported 1-based column. Landing exactly on a segment start is the safe case, not the failing one.</p>
+  <p>An uncorrected lookup overshoots and can land on the mapping segment for the following token. It can never land on an earlier one, because feeding a larger target column to a greatest-less-than-or-equal search returns the same segment or a later one.</p>
+  <p>The name column is the original identifier at the mapped token, taken from the map's <code>names</code> array. It does not name the enclosing function, and a frame can legitimately resolve with no name at all: a 4-field segment carries no name index, and this tool prints "no name in map" rather than substituting the minified identifier or borrowing a name from a nearby segment.</p>
+</section>
+
+<footer>
+  <p>Single file, MIT licensed, works from <code>file://</code>. Source map decoding is reimplemented from the published Source Map specification; no code is reproduced here. This tool is independent and unaffiliated with any project whose maps or traces you paste into it.</p>
+</footer>
+</div>
+
+<script>
+"use strict";
+var SMR = (function () {
+  var B64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+  var B64IDX = Object.create(null);
+  for (var bi = 0; bi < B64.length; bi++) { B64IDX[B64.charAt(bi)] = bi; }
+
+  var MAX_MAPPINGS_CHARS = 40000000;
+  var MAX_SEGMENTS = 4000000;
+  var MAX_TRACE_LINES = 20000;
+  var MAX_FRAMES = 5000;
+
+  function refusal(code, message) { return { code: code, message: message }; }
+
+  // Decode one comma-free segment of Base64 VLQ into an array of signed integers.
+  function decodeSegment(str) {
+    var out = [], value = 0, shift = 0, i, ch, digit, cont;
+    for (i = 0; i < str.length; i++) {
+      ch = str.charAt(i);
+      digit = B64IDX[ch];
+      if (digit === undefined) {
+        throw refusal("bad_char", 'character "' + ch + '" is not in the Base64 alphabet');
+      }
+      cont = digit & 32;
+      value += (digit & 31) * Math.pow(2, shift);
+      if (cont) {
+        shift += 5;
+        if (shift > 60) { throw refusal("vlq_overflow", "a VLQ field is longer than any real offset"); }
+      } else {
+        var negative = value & 1;
+        var magnitude = Math.floor(value / 2);
+        out.push(negative ? -magnitude : magnitude);
+        value = 0; shift = 0;
+      }
+    }
+    if (shift !== 0) { throw refusal("vlq_truncated", "a VLQ field ends with the continuation bit still set"); }
+    return out;
+  }
+
+  // Decode the whole mappings string into one array of segments per generated line.
+  function decodeMappings(mappings) {
+    if (typeof mappings !== "string") { throw refusal("no_mappings", "map contains no mappings"); }
+    if (mappings.length > MAX_MAPPINGS_CHARS) { throw refusal("too_big", "mappings string is larger than this page will decode"); }
+    var lines = [], groups = mappings.split(";");
+    var sourceIndex = 0, originalLine = 0, originalColumn = 0, nameIndex = 0, total = 0;
+    for (var g = 0; g < groups.length; g++) {
+      var generatedColumn = 0, segs = [], parts = groups[g].split(",");
+      for (var p = 0; p < parts.length; p++) {
+        var raw = parts[p];
+        if (raw === "") { continue; }
+        var fields;
+        try {
+          fields = decodeSegment(raw);
+        } catch (e) {
+          if (e && e.code) { throw refusal(e.code, e.message + ", on generated line " + (g + 1) + " (map line index " + g + ")"); }
+          throw e;
+        }
+        if (fields.length !== 1 && fields.length !== 4 && fields.length !== 5) {
+          throw refusal("bad_field_count", "a segment on generated line " + (g + 1) + " has " + fields.length + " fields, and only 1, 4 or 5 are legal");
+        }
+        generatedColumn += fields[0];
+        if (generatedColumn < 0) { throw refusal("negative_column", "a segment on generated line " + (g + 1) + " decodes to a negative generated column"); }
+        var seg = { gc: generatedColumn, fields: fields.length };
+        if (fields.length >= 4) {
+          sourceIndex += fields[1];
+          originalLine += fields[2];
+          originalColumn += fields[3];
+          seg.si = sourceIndex; seg.ol = originalLine; seg.oc = originalColumn;
+        }
+        if (fields.length === 5) {
+          nameIndex += fields[4];
+          seg.ni = nameIndex;
+        }
+        segs.push(seg);
+        total++;
+        if (total > MAX_SEGMENTS) { throw refusal("too_big", "map holds more than " + MAX_SEGMENTS + " segments"); }
+      }
+      segs.sort(function (a, b) { return a.gc - b.gc; });
+      lines.push(segs);
+    }
+    return { lines: lines, segmentCount: total };
+  }
+
+  function safeReviver(key, value) {
+    if (key === "__proto__" || key === "constructor" || key === "prototype") { return undefined; }
+    return value;
+  }
+
+  // Parse and validate the map text. Returns a state object or throws a named refusal.
+  function parseMap(text) {
+    if (typeof text !== "string" || text.trim() === "") { throw refusal("no_map", "no source map supplied"); }
+    var obj;
+    try {
+      obj = JSON.parse(text, safeReviver);
+    } catch (e) {
+      throw refusal("bad_json", "map is not valid JSON: " + (e && e.message ? e.message : String(e)));
+    }
+    if (obj === null || typeof obj !== "object" || Array.isArray(obj)) {
+      throw refusal("not_an_object", "map is valid JSON but not a source map object");
+    }
+    if (Object.prototype.hasOwnProperty.call(obj, "sections")) {
+      throw refusal("index_map", "index map, not supported: index maps with a sections array are not supported by this tool");
+    }
+    if (obj.version !== 3) {
+      throw refusal("bad_version", "source map version is " + JSON.stringify(obj.version) + ", and this tool only reads version 3");
+    }
+    if (typeof obj.mappings !== "string" || obj.mappings === "") {
+      throw refusal("no_mappings", "map contains no mappings");
+    }
+    if (!Array.isArray(obj.sources)) {
+      throw refusal("no_sources", "map has no sources array");
+    }
+    var names = Array.isArray(obj.names) ? obj.names : [];
+    var contents = Array.isArray(obj.sourcesContent) ? obj.sourcesContent : null;
+    var decoded = decodeMappings(obj.mappings);
+    if (decoded.segmentCount === 0) {
+      throw refusal("no_segments", "map contains no mappings: the mappings string is only separators and decodes to zero segments");
+    }
+    return {
+      file: typeof obj.file === "string" ? obj.file : null,
+      sourceRoot: typeof obj.sourceRoot === "string" ? obj.sourceRoot : null,
+      sources: obj.sources,
+      names: names,
+      sourcesContent: contents,
+      lines: decoded.lines,
+      segmentCount: decoded.segmentCount
+    };
+  }
+
+  // Join sourceRoot to a source path with exactly one slash. Absolute sources are left alone.
+  function joinSourceRoot(root, source) {
+    if (typeof source !== "string") { return String(source); }
+    if (!root) { return source; }
+    if (/^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//.test(source) || source.charAt(0) === "/") { return source; }
+    var r = root;
+    while (r.length && r.charAt(r.length - 1) === "/") { r = r.slice(0, -1); }
+    var s = source;
+    while (s.length && s.charAt(0) === "/") { s = s.slice(1); }
+    if (r === "") { return s; }
+    return r + "/" + s;
+  }
+
+  // Greatest index whose generated column is <= col. Returns -1 when there is none.
+  function findSegment(segs, col) {
+    var lo = 0, hi = segs.length - 1, best = -1, mid;
+    while (lo <= hi) {
+      mid = (lo + hi) >> 1;
+      if (segs[mid].gc <= col) { best = mid; lo = mid + 1; }
+      else { hi = mid - 1; }
+    }
+    return best;
+  }
+
+  // One lookup. line and col are as reported (1-based); col is passed in already adjusted.
+  function lookup(state, reportedLine, searchColumn) {
+    var lineIndex = reportedLine - 1;
+    if (!(lineIndex >= 0) || lineIndex >= state.lines.length) {
+      return { status: "no_line", note: "generated line " + reportedLine + " has no mappings" };
+    }
+    var segs = state.lines[lineIndex];
+    if (segs.length === 0) {
+      return { status: "no_line", note: "generated line " + reportedLine + " has no mappings" };
+    }
+    if (searchColumn < 0) {
+      return { status: "no_segment", note: "no mapping at or before this column" };
+    }
+    var i = findSegment(segs, searchColumn);
+    if (i < 0) {
+      return { status: "no_segment", note: "no mapping at or before this column" };
+    }
+    var seg = segs[i];
+    if (seg.fields === 1) {
+      return { status: "unmapped", index: i, note: "the nearest segment marks a generated position with no original mapping" };
+    }
+    if (seg.si < 0 || seg.si >= state.sources.length) {
+      return { status: "inconsistent", index: i, note: "map is internally inconsistent: source index " + seg.si + " is out of range for " + state.sources.length + " sources" };
+    }
+    if (state.sources[seg.si] === null || typeof state.sources[seg.si] !== "string") {
+      return { status: "inconsistent", index: i, note: "map records no original file name here: sources entry " + seg.si + " is not a string" };
+    }
+    if (seg.ol < 0 || seg.oc < 0) {
+      return { status: "inconsistent", index: i, note: "map is internally inconsistent: segment decodes to original line " + seg.ol + " and column " + seg.oc };
+    }
+    var name = null, hasName = false;
+    if (seg.fields === 5) {
+      if (seg.ni < 0 || seg.ni >= state.names.length) {
+        return { status: "inconsistent", index: i, note: "map is internally inconsistent: name index " + seg.ni + " is out of range for " + state.names.length + " names" };
+      }
+      if (typeof state.names[seg.ni] !== "string") {
+        return { status: "inconsistent", index: i, note: "map is internally inconsistent: names entry " + seg.ni + " is not a string" };
+      }
+      name = state.names[seg.ni];
+      hasName = true;
+    }
+    var source = joinSourceRoot(state.sourceRoot, state.sources[seg.si]);
+    var excerpt = null, excerptNote = "source line text not available, this map has no sourcesContent";
+    if (state.sourcesContent) {
+      var content = seg.si < state.sourcesContent.length ? state.sourcesContent[seg.si] : undefined;
+      if (typeof content === "string") {
+        var textLines = content.split(/\r\n|\n|\r/);
+        if (seg.ol < textLines.length) { excerpt = textLines[seg.ol]; excerptNote = null; }
+        else { excerptNote = "source line text not available, sourcesContent for this source has only " + textLines.length + " lines"; }
+      } else {
+        excerptNote = "source line text not available, sourcesContent is null for this source";
+      }
+    }
+    return {
+      status: "ok", index: i, source: source, line: seg.ol + 1, column: seg.oc + 1,
+      name: name, hasName: hasName, excerpt: excerpt, excerptNote: excerptNote
+    };
+  }
+
+  // Resolve one frame both ways. The corrected lookup is the answer.
+  function resolveFrame(state, reportedLine, reportedColumn) {
+    var corrected = lookup(state, reportedLine, reportedColumn - 1);
+    var naive = lookup(state, reportedLine, reportedColumn);
+    var changed = false;
+    if (corrected.status !== naive.status) { changed = true; }
+    else if (corrected.status === "no_line") { changed = false; }
+    else if (corrected.index !== naive.index) { changed = true; }
+    return { corrected: corrected, naive: naive, changed: changed };
+  }
+
+  var RE_AT_PAREN = /^\s*at\s+(.+?)\s+\((.+?):(\d+):(\d+)\)\s*$/;
+  var RE_AT_BARE = /^\s*at\s+(.+?):(\d+):(\d+)\s*$/;
+  var RE_LOOSE = /^\s*\(?\s*(\S.*?):(\d+):(\d+)\)?\s*$/;
+
+  function toPos(s) {
+    if (s.length > 9) { return null; }
+    var n = parseInt(s, 10);
+    if (!isFinite(n) || n < 1) { return null; }
+    return n;
+  }
+
+  // Pull frames out of free text. Everything that does not match is kept verbatim.
+  function parseTrace(text) {
+    var frames = [], unparsed = [], truncated = false;
+    if (typeof text !== "string" || text.trim() === "") {
+      throw refusal("no_trace", "no stack trace supplied");
+    }
+    var rows = text.split(/\r\n|\n|\r/);
+    if (rows.length > MAX_TRACE_LINES) { rows = rows.slice(0, MAX_TRACE_LINES); truncated = true; }
+    for (var i = 0; i < rows.length; i++) {
+      var row = rows[i];
+      if (row.trim() === "") { continue; }
+      var m = RE_AT_PAREN.exec(row), fn = null, file = null, line = null, col = null;
+      if (m) { fn = m[1]; file = m[2]; line = toPos(m[3]); col = toPos(m[4]); }
+      else {
+        m = RE_AT_BARE.exec(row);
+        if (m) { file = m[1]; line = toPos(m[2]); col = toPos(m[3]); }
+        else {
+          m = RE_LOOSE.exec(row);
+          if (m) { file = m[1]; line = toPos(m[2]); col = toPos(m[3]); }
+        }
+      }
+      if (m && line !== null && col !== null && frames.length < MAX_FRAMES) {
+        frames.push({ raw: row.trim(), fn: fn, file: file, line: line, column: col });
+      } else {
+        unparsed.push(row);
+      }
+    }
+    if (frames.length === 0) {
+      throw refusal("no_frames", "no stack frames found in the pasted text");
+    }
+    return { frames: frames, unparsed: unparsed, truncated: truncated };
+  }
+
+  // Sweep every 1-based column on every generated line and compare the two lookups.
+  // Reproduces, in the browser, the property the verdict column depends on.
+  function sweep(state) {
+    var compared = 0, later = 0, earlier = 0, mismatch = 0;
+    for (var li = 0; li < state.lines.length; li++) {
+      var segs = state.lines[li];
+      if (segs.length === 0) { continue; }
+      var cols = Object.create(null);
+      for (var s = 0; s < segs.length; s++) { cols[segs[s].gc] = true; }
+      var maxCol = segs[segs.length - 1].gc;
+      for (var c = 1; c <= maxCol + 1; c++) {
+        var a = findSegment(segs, c - 1), b = findSegment(segs, c);
+        if (a < 0 && b < 0) { continue; }
+        compared++;
+        if (b > a) { later++; }
+        else if (b < a) { earlier++; }
+        if ((a !== b) !== (cols[c] === true)) { mismatch++; }
+      }
+    }
+    return { compared: compared, later: later, earlier: earlier, iffMismatches: mismatch };
+  }
+
+  // Segments that have another segment exactly one generated column later.
+  function adjacentPairs(state) {
+    var count = 0, total = 0, noName = 0;
+    for (var li = 0; li < state.lines.length; li++) {
+      var segs = state.lines[li], cols = Object.create(null), s;
+      for (s = 0; s < segs.length; s++) { cols[segs[s].gc] = true; }
+      for (s = 0; s < segs.length; s++) {
+        total++;
+        if (segs[s].fields === 4) { noName++; }
+        if (cols[segs[s].gc + 1] === true) { count++; }
+      }
+    }
+    return { oneApart: count, segments: total, noNameSegments: noName };
+  }
+
+  var EXAMPLE_MAP = {
+    version: 3,
+    file: "app.min.js",
+    sources: ["src/app.js", "src/util.js"],
+    names: ["greet", "user", "total", "format"],
+    mappings: "AAAAA,UAMiDC,CAC3BC,6BCInB;I,qBASIC,mCDUPH"
+  };
+
+  var EXAMPLE_TRACE = [
+    "Error: cannot read properties of undefined",
+    "    at greet (https://example.com/app.min.js:1:11)",
+    "    at https://example.com/app.min.js:1:41",
+    "    at format (/srv/build/app.min.js:2:26)",
+    "    at app.min.js:2:6",
+    "    at app.min.js:2:2",
+    "    at app.min.js:9:5"
+  ].join("\n");
+
+  return {
+    decodeSegment: decodeSegment,
+    decodeMappings: decodeMappings,
+    parseMap: parseMap,
+    parseTrace: parseTrace,
+    joinSourceRoot: joinSourceRoot,
+    findSegment: findSegment,
+    lookup: lookup,
+    resolveFrame: resolveFrame,
+    sweep: sweep,
+    adjacentPairs: adjacentPairs,
+    exampleMapText: JSON.stringify(EXAMPLE_MAP, null, 2),
+    exampleTrace: EXAMPLE_TRACE
+  };
+})();
+
+var SMR_TESTS = (function () {
+  var results = [];
+  function ok(name, pass, detail) { results.push({ name: name, pass: pass, detail: detail || "", control: false }); }
+  function eq(name, actual, expected) {
+    var a = JSON.stringify(actual), e = JSON.stringify(expected);
+    ok(name, a === e, a === e ? "" : "got " + a + ", expected " + e);
+  }
+  function refuses(name, fn, code) {
+    var got = "no refusal";
+    try { fn(); } catch (e) { got = e && e.code ? e.code : String(e); }
+    ok(name, got === code, got === code ? "" : "got " + got + ", expected " + code);
+  }
+
+  function run() {
+    results = [];
+    var i;
+
+    // 1. Base64 VLQ decoding.
+    eq("VLQ A decodes to 0", SMR.decodeSegment("A"), [0]);
+    eq("VLQ C decodes to 1", SMR.decodeSegment("C"), [1]);
+    eq("VLQ D decodes to -1", SMR.decodeSegment("D"), [-1]);
+    eq("VLQ gB decodes to 16 (continuation then payload)", SMR.decodeSegment("gB"), [16]);
+    eq("VLQ hB decodes to -16 (sign bit set)", SMR.decodeSegment("hB"), [-16]);
+    eq("VLQ AAAAA is five zero fields", SMR.decodeSegment("AAAAA"), [0, 0, 0, 0, 0]);
+    eq("VLQ 6BCInB decodes the example 4-field segment", SMR.decodeSegment("6BCInB"), [29, 1, 4, -19]);
+    refuses("VLQ rejects a character outside the alphabet", function () { SMR.decodeSegment("A$"); }, "bad_char");
+    refuses("VLQ rejects a truncated continuation", function () { SMR.decodeSegment("g"); }, "vlq_truncated");
+
+    // 2. Mappings structure on the worked example.
+    var state = SMR.parseMap(SMR.exampleMapText);
+    eq("example decodes to 2 generated lines", state.lines.length, 2);
+    eq("example line 1 segment columns", state.lines[0].map(function (s) { return s.gc; }), [0, 10, 11, 40]);
+    eq("example line 2 segment columns (generated column resets per line)", state.lines[1].map(function (s) { return s.gc; }), [4, 25, 60]);
+    eq("example field counts line 1", state.lines[0].map(function (s) { return s.fields; }), [5, 5, 5, 4]);
+    eq("example field counts line 2", state.lines[1].map(function (s) { return s.fields; }), [1, 5, 5]);
+    eq("source index, original line and column persist across generated lines",
+      [state.lines[1][1].si, state.lines[1][1].ol, state.lines[1][1].oc], [1, 20, 7]);
+    eq("example segment count", state.segmentCount, 7);
+
+    // 3. The headline behaviour: the minus one correction on the worked example.
+    var f1 = SMR.resolveFrame(state, 1, 11);
+    eq("frame 1:11 corrected lands on src/app.js 7:50 name user",
+      [f1.corrected.source, f1.corrected.line, f1.corrected.column, f1.corrected.name], ["src/app.js", 7, 50, "user"]);
+    eq("frame 1:11 uncorrected lands on src/app.js 8:23 name total",
+      [f1.naive.source, f1.naive.line, f1.naive.column, f1.naive.name], ["src/app.js", 8, 23, "total"]);
+    ok("frame 1:11 is flagged as changed by the correction", f1.changed === true);
+    ok("frame 1:11 uncorrected lands on a LATER segment, never an earlier one", f1.naive.index > f1.corrected.index);
+    ok("frame 1:11 changes the original LINE, not only the column", f1.corrected.line !== f1.naive.line);
+
+    var f2 = SMR.resolveFrame(state, 1, 41);
+    eq("frame 1:41 resolves to src/util.js 12:4", [f2.corrected.source, f2.corrected.line, f2.corrected.column], ["src/util.js", 12, 4]);
+    ok("frame 1:41 is a 4-field segment and carries no name", f2.corrected.hasName === false && f2.corrected.name === null);
+    ok("frame 1:41 is not flagged", f2.changed === false);
+
+    var f3 = SMR.resolveFrame(state, 2, 26);
+    eq("frame 2:26 resolves to src/util.js 21:8 name format",
+      [f3.corrected.source, f3.corrected.line, f3.corrected.column, f3.corrected.name], ["src/util.js", 21, 8, "format"]);
+    ok("frame 2:26 is not flagged", f3.changed === false);
+
+    var f4 = SMR.resolveFrame(state, 2, 6);
+    eq("frame 2:6 hits a 1-field segment and refuses", f4.corrected.status, "unmapped");
+    var f5 = SMR.resolveFrame(state, 2, 2);
+    eq("frame 2:2 is before the first mapping on the line", f5.corrected.status, "no_segment");
+    var f6 = SMR.resolveFrame(state, 9, 5);
+    eq("frame 9:5 is past the last generated line", f6.corrected.status, "no_line");
+
+    // 4. sourcesContent is the exception, not the rule.
+    ok("a map with no sourcesContent refuses the excerpt by name",
+      f3.corrected.excerpt === null && /no sourcesContent/.test(f3.corrected.excerptNote));
+    var withContent = JSON.parse(SMR.exampleMapText);
+    withContent.sourcesContent = ["line one\nline two\nline three\nline four\nline five\nline six\nline seven exactly\n", null];
+    var stateC = SMR.parseMap(JSON.stringify(withContent));
+    eq("sourcesContent supplies the original line text when present",
+      SMR.resolveFrame(stateC, 1, 11).corrected.excerpt, "line seven exactly");
+    ok("a null sourcesContent entry refuses by name rather than guessing",
+      /sourcesContent is null/.test(SMR.resolveFrame(stateC, 2, 26).corrected.excerptNote));
+
+    // 5. The sweep property, recomputed here in the browser.
+    var sw = SMR.sweep(state);
+    eq("sweep of the example: naive never lands earlier", sw.earlier, 0);
+    eq("sweep of the example: naive lands later 6 times", sw.later, 6);
+    eq("sweep of the example: 99 column positions compared", sw.compared, 99);
+    eq("divergence happens at exactly the columns where a segment starts", sw.iffMismatches, 0);
+    var ap = SMR.adjacentPairs(state);
+    eq("example segments with another segment exactly one column later", ap.oneApart, 1);
+    eq("example segments carrying no name index", ap.noNameSegments, 1);
+
+    // 6. Trace parsing shapes.
+    var t = SMR.parseTrace(SMR.exampleTrace);
+    eq("worked example yields 6 frames", t.frames.length, 6);
+    eq("the message line is kept as unparsed text", t.unparsed, ["Error: cannot read properties of undefined"]);
+    eq("shape: at fn (url:line:col)", [t.frames[0].fn, t.frames[0].file, t.frames[0].line, t.frames[0].column],
+      ["greet", "https://example.com/app.min.js", 1, 11]);
+    eq("shape: at url:line:col", [t.frames[1].fn, t.frames[1].file], [null, "https://example.com/app.min.js"]);
+    eq("shape: at fn (/abs/path:line:col)", [t.frames[2].fn, t.frames[2].file], ["format", "/srv/build/app.min.js"]);
+    var bare = SMR.parseTrace("app.min.js:6:7876");
+    eq("shape: bare file:line:col", [bare.frames[0].file, bare.frames[0].line, bare.frames[0].column], ["app.min.js", 6, 7876]);
+    refuses("text with no frames refuses by name", function () { SMR.parseTrace("nothing here at all"); }, "no_frames");
+    refuses("empty trace refuses by name", function () { SMR.parseTrace("   "); }, "no_trace");
+
+    // 7. Map refusals, one named message each.
+    refuses("empty map refuses by name", function () { SMR.parseMap(""); }, "no_map");
+    refuses("invalid JSON refuses by name", function () { SMR.parseMap("{not json"); }, "bad_json");
+    refuses("version 2 is refused", function () { SMR.parseMap('{"version":2,"sources":[],"names":[],"mappings":"A"}'); }, "bad_version");
+    refuses("an index map is refused rather than flattened", function () {
+      SMR.parseMap('{"version":3,"sections":[],"sources":[],"names":[],"mappings":"A"}');
+    }, "index_map");
+    refuses("a map with an empty mappings string is refused", function () {
+      SMR.parseMap('{"version":3,"sources":[],"names":[],"mappings":""}');
+    }, "no_mappings");
+    refuses("a mappings string of separators only is refused, not treated as an empty map", function () {
+      SMR.parseMap('{"version":3,"sources":[],"names":[],"mappings":";;;;"}');
+    }, "no_segments");
+    refuses("a character outside the alphabet stops the decode", function () {
+      SMR.parseMap('{"version":3,"sources":["a.js"],"names":[],"mappings":"AA$AA"}');
+    }, "bad_char");
+    refuses("a JSON array is not a source map object", function () { SMR.parseMap("[]"); }, "not_an_object");
+
+    // 8. Internally inconsistent maps are marked unresolvable, never guessed.
+    var badSource = SMR.parseMap('{"version":3,"sources":["only.js"],"names":[],"mappings":"AEAA"}');
+    eq("a source index past the end of sources is reported, not printed as a file",
+      SMR.resolveFrame(badSource, 1, 1).corrected.status, "inconsistent");
+    var badName = SMR.parseMap('{"version":3,"sources":["only.js"],"names":["one"],"mappings":"AAAAE"}');
+    eq("a name index past the end of names is reported, not printed as a name",
+      SMR.resolveFrame(badName, 1, 1).corrected.status, "inconsistent");
+    var nullSource = SMR.parseMap('{"version":3,"sources":[null],"names":[],"mappings":"AAAA"}');
+    eq("a null sources entry is refused, not printed as the file name",
+      SMR.resolveFrame(nullSource, 1, 1).corrected.status, "inconsistent");
+    ok("the null sources refusal names the entry it refused on",
+      /sources entry 0 is not a string/.test(SMR.resolveFrame(nullSource, 1, 1).corrected.note));
+    var numberSource = SMR.parseMap('{"version":3,"sources":[42],"names":[],"mappings":"AAAA"}');
+    eq("a sources entry that is not a string is refused, not stringified",
+      SMR.resolveFrame(numberSource, 1, 1).corrected.status, "inconsistent");
+    var nullNameEntry = SMR.parseMap('{"version":3,"sources":["a.js"],"names":[null],"mappings":"AAAAA"}');
+    eq("a null names entry is refused, not rendered as an unmarked blank name",
+      SMR.resolveFrame(nullNameEntry, 1, 1).corrected.status, "inconsistent");
+    ok("the null names refusal names the entry it refused on",
+      /names entry 0 is not a string/.test(SMR.resolveFrame(nullNameEntry, 1, 1).corrected.note));
+    var objectNameEntry = SMR.parseMap('{"version":3,"sources":["a.js"],"names":[{"x":1}],"mappings":"AAAAA"}');
+    eq("a names entry that is not a string is refused, not rendered as an object",
+      SMR.resolveFrame(objectNameEntry, 1, 1).corrected.status, "inconsistent");
+
+    // 9. sourceRoot joining.
+    eq("sourceRoot joins with exactly one slash", SMR.joinSourceRoot("dist/", "src/app.js"), "dist/src/app.js");
+    eq("sourceRoot without a trailing slash still joins with one", SMR.joinSourceRoot("dist", "src/app.js"), "dist/src/app.js");
+    eq("an absolute source path is left untouched", SMR.joinSourceRoot("dist/", "/srv/src/app.js"), "/srv/src/app.js");
+    eq("a source with a scheme is left untouched", SMR.joinSourceRoot("dist/", "https://example.com/src/app.js"), "https://example.com/src/app.js");
+    eq("no sourceRoot leaves the source untouched", SMR.joinSourceRoot(null, "src/app.js"), "src/app.js");
+
+    // 10. Prototype pollution guard on user JSON.
+    var polluted = SMR.parseMap('{"version":3,"sources":["a.js"],"names":[],"mappings":"AAAA","__proto__":{"polluted":true}}');
+    ok("a __proto__ key in the pasted map does not reach Object.prototype",
+      ({}).polluted === undefined && polluted.lines.length === 1);
+
+    // Positive control. This assertion is designed to fail. If it ever passes, or if
+    // it never appears in the report, the runner stopped early and the report lies.
+    var control = SMR.resolveFrame(state, 1, 11).corrected.line === 999;
+    results.push({
+      name: "POSITIVE CONTROL (must fail): frame 1:11 resolves to original line 999",
+      pass: control, detail: control ? "" : "correctly failed: it resolves to line 7", control: true
+    });
+
+    var real = results.filter(function (r) { return !r.control; });
+    var ctrl = results.filter(function (r) { return r.control; });
+    return {
+      results: results,
+      total: real.length,
+      passed: real.filter(function (r) { return r.pass; }).length,
+      failed: real.filter(function (r) { return !r.pass; }).length,
+      controlOk: ctrl.length === 1 && ctrl[0].pass === false,
+      sweep: sw
+    };
+  }
+  return { run: run };
+})();
+
+if (typeof document !== "undefined") {
+  (function () {
+    var $ = function (id) { return document.getElementById(id); };
+    var traceEl = $("trace"), mapEl = $("mapjson"), statusEl = $("status"), resultsEl = $("results"), dropEl = $("drop");
+
+    function clear(node) { while (node.firstChild) { node.removeChild(node.firstChild); } }
+
+    function say(kind, text) {
+      var p = document.createElement("p");
+      if (kind) { p.className = kind; }
+      p.textContent = text;
+      statusEl.appendChild(p);
+      return p;
+    }
+
+    function td(row, text, cls) {
+      var cell = document.createElement("td");
+      cell.textContent = text;
+      if (cls) { cell.className = cls; }
+      row.appendChild(cell);
+      return cell;
+    }
+
+    function describe(outcome) {
+      if (outcome.status === "ok") {
+        return outcome.source + " " + outcome.line + ":" + outcome.column +
+          (outcome.hasName ? ' name "' + outcome.name + '"' : " (no name in map)");
+      }
+      return outcome.note;
+    }
+
+    function render(state, parsed) {
+      clear(resultsEl);
+      var table = document.createElement("table");
+      var cap = document.createElement("caption");
+      cap.textContent = "One row per frame. Positions are 1-based, as a human reads them. A second row appears under any frame with more to say.";
+      table.appendChild(cap);
+      var thead = document.createElement("thead"), hr = document.createElement("tr");
+      var heads = ["Frame as reported", "Original file", "Original line", "Original column",
+        "Original name at this token, when the map carries one", "Verdict"];
+      for (var h = 0; h < heads.length; h++) {
+        var th = document.createElement("th");
+        th.setAttribute("scope", "col");
+        th.textContent = heads[h];
+        hr.appendChild(th);
+      }
+      thead.appendChild(hr);
+      table.appendChild(thead);
+      var tbody = document.createElement("tbody");
+      var changedCount = 0;
+
+      for (var i = 0; i < parsed.frames.length; i++) {
+        var fr = parsed.frames[i];
+        var res = SMR.resolveFrame(state, fr.line, fr.column);
+        var c = res.corrected;
+        var tr = document.createElement("tr");
+        if (res.changed) { tr.className = "flagged"; changedCount++; }
+
+        td(tr, (fr.file || "(no file in frame)") + " " + fr.line + ":" + fr.column, "mono num");
+        if (c.status === "ok") {
+          td(tr, c.source, "mono");
+          td(tr, String(c.line), "mono num");
+          td(tr, String(c.column), "mono num");
+          if (c.hasName) { td(tr, c.name, "mono"); }
+          else { td(tr, "no name in map", "soft"); }
+        } else {
+          td(tr, c.note, "soft");
+          td(tr, "", "num");
+          td(tr, "", "num");
+          td(tr, "", "soft");
+        }
+        td(tr, res.changed ? "correction changed the answer" : "no change", res.changed ? "warnmsg" : "soft");
+        tbody.appendChild(tr);
+
+        var detail = [];
+        if (res.changed) {
+          detail.push("With the minus one correction: " + describe(c));
+          detail.push("A resolver without the correction would report: " + describe(res.naive));
+        }
+        if (c.status === "ok") {
+          if (c.excerpt !== null) { detail.push("Original line text: " + c.excerpt); }
+          else { detail.push(c.excerptNote); }
+        }
+        if (detail.length) {
+          var dr = document.createElement("tr");
+          dr.className = res.changed ? "detail flagged" : "detail";
+          var dc = document.createElement("td");
+          dc.setAttribute("colspan", "6");
+          for (var d = 0; d < detail.length; d++) {
+            var line = document.createElement("div");
+            line.className = "mono";
+            line.textContent = detail[d];
+            dc.appendChild(line);
+          }
+          dr.appendChild(dc);
+          tbody.appendChild(dr);
+        }
+      }
+      table.appendChild(tbody);
+      var wrap = document.createElement("div");
+      wrap.className = "tablewrap";
+      wrap.appendChild(table);
+      resultsEl.appendChild(wrap);
+
+      if (parsed.unparsed.length) {
+        var h2 = document.createElement("h2");
+        h2.textContent = "Lines that were not read as frames (" + parsed.unparsed.length + ")";
+        resultsEl.appendChild(h2);
+        var pre = document.createElement("pre");
+        pre.textContent = parsed.unparsed.join("\n");
+        resultsEl.appendChild(pre);
+      }
+      return changedCount;
+    }
+
+    // The map is decoded once per distinct map text and the decoded state is kept.
+    // Pressing Resolve frames again on an unchanged map reuses it instead of re-decoding.
+    var cacheKey = null, cacheState = null, cacheError = null, decodeTimer = null;
+
+    function decodeMap(mapText) {
+      if (cacheKey === mapText) {
+        if (cacheError) { throw cacheError; }
+        if (cacheState) { return cacheState; }
+      }
+      cacheKey = mapText; cacheState = null; cacheError = null;
+      try {
+        cacheState = SMR.parseMap(mapText);
+      } catch (e) {
+        cacheError = e;
+        throw e;
+      }
+      return cacheState;
+    }
+
+    function forgetMap() { cacheKey = null; cacheState = null; cacheError = null; }
+
+    // Decode on input change, showing a plain text state while it runs. No spinner.
+    function scheduleDecode(loadNote) {
+      var text = mapEl.value;
+      if (decodeTimer !== null) { window.clearTimeout(decodeTimer); decodeTimer = null; }
+      clear(statusEl);
+      if (text.trim() === "") { forgetMap(); return; }
+      if (loadNote) { say("infomsg", loadNote); }
+      say("", "decoding map");
+      decodeTimer = window.setTimeout(function () {
+        decodeTimer = null;
+        if (mapEl.value !== text) { return; }
+        var state = null, message = "";
+        try { state = decodeMap(text); } catch (e) { message = e && e.message ? e.message : String(e); }
+        clear(statusEl);
+        if (loadNote) { say("infomsg", loadNote); }
+        if (state) {
+          say("okmsg", "Map decoded: " + state.segmentCount + " mapping segment" +
+            (state.segmentCount === 1 ? "" : "s") + " across " +
+            state.lines.length + " generated line" + (state.lines.length === 1 ? "" : "s") +
+            ". Press Resolve frames.");
+        } else {
+          say("err", "Map refused: " + message);
+        }
+      }, 0);
+    }
+
+    function resolveNow() {
+      if (decodeTimer !== null) { window.clearTimeout(decodeTimer); decodeTimer = null; }
+      clear(statusEl);
+      clear(resultsEl);
+      var traceText = traceEl.value, mapText = mapEl.value;
+      if (traceText.trim() === "" && mapText.trim() === "") {
+        say("warnmsg", "paste a stack trace and a source map, or press Load the worked example");
+        return;
+      }
+      if (mapText.trim() === "") { say("err", "no source map supplied"); return; }
+      if (traceText.trim() === "") { say("err", "no stack trace supplied"); return; }
+
+      var state, parsed;
+      try {
+        state = decodeMap(mapText);
+      } catch (e) {
+        say("err", "Map refused: " + (e && e.message ? e.message : String(e)));
+        return;
+      }
+      try {
+        parsed = SMR.parseTrace(traceText);
+      } catch (e) {
+        say("err", "Trace refused: " + (e && e.message ? e.message : String(e)));
+        if (e && e.code === "no_frames") {
+          var first = traceText.split(/\r\n|\n|\r/).slice(0, 3);
+          var pre = document.createElement("pre");
+          pre.textContent = "First lines read:\n" + first.join("\n");
+          statusEl.appendChild(pre);
+        }
+        return;
+      }
+      var changed = 0;
+      try {
+        changed = render(state, parsed);
+      } catch (e) {
+        clear(resultsEl);
+        say("err", "Resolution failed: " + (e && e.message ? e.message : String(e)));
+        return;
+      }
+      say("okmsg", parsed.frames.length + " frame" + (parsed.frames.length === 1 ? "" : "s") + ", " +
+        changed + " changed by the correction. Map holds " + state.segmentCount +
+        " mapping segments across " + state.lines.length + " generated line" + (state.lines.length === 1 ? "" : "s") + ".");
+      if (!state.sourcesContent) {
+        say("", "This map has no sourcesContent, so no original line text can be shown.");
+      }
+      if (parsed.truncated) {
+        say("warnmsg", "The pasted trace was longer than this page reads and was cut at 20000 lines.");
+      }
+    }
+
+    function loadExample() {
+      traceEl.value = SMR.exampleTrace;
+      mapEl.value = SMR.exampleMapText;
+      resolveNow();
+    }
+
+    function readFile(file) {
+      clear(statusEl);
+      if (!file) { return; }
+      if (file.size > 33554432) {
+        say("err", 'That file is ' + file.size + ' bytes, which is past the 33554432 byte ceiling this page reads.');
+        return;
+      }
+      var reader = new FileReader();
+      reader.onerror = function () { say("err", "The browser could not read that file."); };
+      reader.onload = function () {
+        mapEl.value = String(reader.result);
+        scheduleDecode('Loaded "' + file.name + '" (' + file.size + " bytes) into the source map box.");
+      };
+      reader.readAsText(file);
+    }
+
+    $("resolve").addEventListener("click", resolveNow);
+    $("example").addEventListener("click", loadExample);
+    mapEl.addEventListener("input", function () { scheduleDecode(null); });
+    $("clear").addEventListener("click", function () {
+      traceEl.value = ""; mapEl.value = ""; $("mapfile").value = "";
+      if (decodeTimer !== null) { window.clearTimeout(decodeTimer); decodeTimer = null; }
+      forgetMap();
+      clear(statusEl); clear(resultsEl);
+      say("", "Cleared.");
+    });
+    $("mapfile").addEventListener("change", function (ev) { readFile(ev.target.files && ev.target.files[0]); });
+
+    dropEl.addEventListener("dragover", function (ev) { ev.preventDefault(); dropEl.classList.add("over"); });
+    dropEl.addEventListener("dragleave", function () { dropEl.classList.remove("over"); });
+    dropEl.addEventListener("drop", function (ev) {
+      ev.preventDefault();
+      dropEl.classList.remove("over");
+      if (ev.dataTransfer && ev.dataTransfer.files && ev.dataTransfer.files.length) { readFile(ev.dataTransfer.files[0]); }
+    });
+
+    $("selftest").addEventListener("click", function () {
+      clear(statusEl);
+      clear(resultsEl);
+      var out;
+      try {
+        out = SMR_TESTS.run();
+      } catch (e) {
+        say("err", "The self test itself threw: " + (e && e.message ? e.message : String(e)));
+        return;
+      }
+      var headline = out.passed + " of " + out.total + " assertions passed, " + out.failed + " failed.";
+      say(out.failed === 0 ? "okmsg" : "err", headline);
+      say(out.controlOk ? "okmsg" : "err", out.controlOk
+        ? "Positive control failed as designed, so the run reached the end."
+        : "POSITIVE CONTROL DID NOT FAIL. Treat this whole report as unreliable.");
+      say("", "Column sweep of the worked example: " + out.sweep.compared +
+        " column positions compared, the uncorrected lookup landed on a later segment " + out.sweep.later +
+        " times and on an earlier segment " + out.sweep.earlier + " times.");
+
+      var h2 = document.createElement("h2");
+      h2.textContent = "Self test detail";
+      resultsEl.appendChild(h2);
+      var ul = document.createElement("ul");
+      ul.className = "plain";
+      for (var i = 0; i < out.results.length; i++) {
+        var r = out.results[i];
+        var li = document.createElement("li");
+        var tag = document.createElement("strong");
+        if (r.control) { tag.textContent = r.pass ? "BROKEN " : "CONTROL "; tag.className = r.pass ? "err" : "okmsg"; }
+        else { tag.textContent = r.pass ? "PASS " : "FAIL "; tag.className = r.pass ? "okmsg" : "err"; }
+        li.appendChild(tag);
+        li.appendChild(document.createTextNode(r.name + (r.detail ? " -> " + r.detail : "")));
+        ul.appendChild(li);
+      }
+      resultsEl.appendChild(ul);
+    });
+
+    say("", "Two inputs, one button. Paste a trace on the left and its source map on the right, then press Resolve frames. Nothing is uploaded: the decoding happens in this tab.");
+    say("", 'If you have neither to hand, press "Load the worked example" for a small map and trace that exercise both outcomes, a frame the correction changes and frames it does not.');
+  })();
+}
+</script>
+</body>
+</html>
