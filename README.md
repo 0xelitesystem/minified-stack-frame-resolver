@@ -108,4 +108,4 @@ No third party code is reproduced in this repository. The Base64 VLQ decoder and
 
 ## License
 
-MIT. Copyright (c) 2026 0xelitesystem.
+MIT. Copyright (c) 2026 RBL Industries LLC.
